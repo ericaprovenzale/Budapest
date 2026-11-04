@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Budapest ✨❤️ — Travel Planner & Mappa</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS & JS (Mappa Interattiva gratuita senza API key) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+  <!-- PapaParse per leggere il CSV di Google Sheets in diretta -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <!-- SortableJS per il drag & drop delle tappe -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+    /* Scrollbar sottile per la barra dei tag */
+    .no-scrollbar::-webkit-scrollbar {
+      height: 5px;
+      width: 5px;
+    }
+    .no-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .no-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    /* Stile personalizzato per i Pin sulla mappa */
+    .custom-emoji-pin {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 9999px;
+      background: #ffffff;
+      border: 2.5px solid #e11d48;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
+      font-size: 18px;
+      transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+    .custom-emoji-pin:hover {
+      transform: scale(1.18);
+      z-index: 999 !important;
+    }
+    .custom-emoji-pin.visited-pin {
+      border-color: #10b981;
+      background: #ecfdf5;
+      opacity: 0.85;
+    }
+    .leaflet-popup-content-wrapper {
+      border-radius: 16px;
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15);
+    }
+    @media print {
+      .no-print {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- HEADER PRINCIPALE -->
+  <header class="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        
+        <!-- Titolo e contatore live -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center text-white text-xl shadow-sm">
+              🇭🇺
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">
+                  Budapest ✨❤️
+                </h1>
+                <span id="syncBadge" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Live da Sheets
+                </span>
+              </div>
+              <p id="statsSubheader" class="text-xs text-slate-500">
+                Caricamento luoghi dal tuo foglio Google...
+              </p>
+            </div>
+          </div>
+
+          <!-- Pulsante ricarica su mobile -->
+          <button onclick="fetchPlacesFromSheet(true)" title="Ricarica dati da Google Sheets"
+            class="md:hidden p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 active:scale-95 transition">
+            🔄
+          </button>
+        </div>
+
+        <!-- Selettore Modalità di Visualizzazione + Azioni -->
+        <div class="flex flex-wrap items-center gap-2 no-print">
+          <div class="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200 w-full sm:w-auto">
+            <button id="btnViewSplit" onclick="setViewMode('split')"
+              class="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center justify-center gap-1.5 bg-white text-slate-900 shadow-sm">
+              <span>🗺️</span> Mappa + Schede
+            </button>
+            <button id="btnViewCategories" onclick="setViewMode('categories')"
+              class="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center justify-center gap-1.5 text-slate-600 hover:text-slate-900">
+              <span>📑</span> Lista Scritta per Tag
+            </button>
+            <button id="btnViewRoute" onclick="setViewMode('route')"
+              class="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center justify-center gap-1.5 text-slate-600 hover:text-slate-900">
+              <span>🧭</span> Itinerario (<span id="routeCount">0</span>)
+            </button>
+          </div>
+
+          <button onclick="fetchPlacesFromSheet(true)"
+            class="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition">
+            <span>🔄</span> Aggiorna Sheets
+          </button>
+
+          <button onclick="window.print()"
+            class="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+            title="Stampa o salva in PDF la lista">
+            <span>🖨️</span> Stampa / PDF
+          </button>
+        </div>
+      </div>
+
+      <!-- WIDGET: METEO + CAMBIO + RADAR -->
+      <div class="mt-3 flex items-center gap-2 overflow-x-auto no-scrollbar no-print">
+        <div id="weatherBox" class="shrink-0 px-3 py-1.5 rounded-xl bg-sky-50 border border-sky-200 text-xs font-semibold text-sky-900 whitespace-nowrap">⏳ Meteo Budapest...</div>
+
+        <div class="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+          <input id="eurIn" type="number" inputmode="decimal" placeholder="0" oninput="convertCurrency('eur')" class="w-16 px-1.5 py-1 rounded-lg border border-amber-200 bg-white text-right focus:outline-none focus:ring-2 focus:ring-amber-400/40" />
+          <span class="font-bold text-amber-900">€</span>
+          <span class="text-amber-700">⇄</span>
+          <input id="hufIn" type="number" inputmode="decimal" placeholder="0" oninput="convertCurrency('huf')" class="w-20 px-1.5 py-1 rounded-lg border border-amber-200 bg-white text-right focus:outline-none focus:ring-2 focus:ring-amber-400/40" />
+          <span class="font-bold text-amber-900">Ft</span>
+          <span id="rateLabel" class="text-[10px] text-amber-700 whitespace-nowrap"></span>
+        </div>
+
+        <div class="shrink-0 flex items-center gap-1.5">
+          <button id="radarBtn" onclick="toggleRadar()" class="px-3 py-1.5 rounded-xl border border-sky-200 bg-white text-xs font-semibold text-sky-700 hover:bg-sky-50 transition whitespace-nowrap">📡 Radar</button>
+          <select id="radarMin" onchange="setRadarMin(this.value)" class="px-2 py-1.5 rounded-xl bg-slate-100/80 border border-slate-200 text-xs font-medium text-slate-700">
+            <option value="10">10 min</option>
+            <option value="15" selected>15 min</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- BARRA DI RICERCA E FILTRI STATO -->
+      <div class="mt-3 flex flex-col sm:flex-row gap-2 no-print">
+        <div class="relative flex-1">
+          <span class="absolute inset-y-0 left-3 flex items-center text-slate-400 text-sm">🔍</span>
+          <input id="searchInput" type="text" oninput="handleSearch(this.value)"
+            placeholder="Cerca luogo, nota (es. mercatini, strudel, langos, basilica)..."
+            class="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-100/80 border border-slate-200 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-500 transition" />
+          <button id="clearSearchBtn" onclick="clearSearch()" class="hidden absolute inset-y-0 right-2.5 px-1 text-slate-400 hover:text-slate-600 text-xs">
+            ✕
+          </button>
+        </div>
+
+        <!-- Filtro Visitati / Da vedere -->
+        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+          <select id="statusFilter" onchange="handleStatusFilter(this.value)"
+            class="px-3 py-2 rounded-xl bg-slate-100/80 border border-slate-200 text-xs sm:text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/30">
+            <option value="all">📍 Tutti i luoghi</option>
+            <option value="todo">⏳ Solo da visitare</option>
+            <option value="done">✅ Già visitati</option>
+          </select>
+
+          <button id="multiTagModeBtn" onclick="toggleTagMatchMode()"
+            class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 whitespace-nowrap transition"
+            title="Cambia come combinare più tag selezionati">
+            Filtro tag: <strong id="tagModeLabel" class="text-rose-600">ALMENO UNO (OR)</strong>
+          </button>
+        </div>
+      </div>
+
+      <!-- BARRA DEI TAG (Scorrevole orizzontalmente) -->
+      <div class="mt-2.5 flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 no-print" id="tagBarContainer">
+        <!-- Popolato dinamicamente da JS -->
+      </div>
+    </div>
+  </header>
+
+  <!-- CONTENUTO PRINCIPALE -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4">
+
+    <!-- Toggle rapido Mappa/Lista solo su Mobile quando siamo in modalità Split -->
+    <div id="mobileSplitToggle" class="flex lg:hidden mb-3 bg-slate-200/80 p-1 rounded-xl no-print">
+      <button id="mobTabList" onclick="setMobilePane('list')"
+        class="flex-1 py-1.5 text-xs font-bold rounded-lg bg-white text-slate-900 shadow-sm">
+        📋 Elenco Schede (<span id="mobCountBadge">0</span>)
+      </button>
+      <button id="mobTabMap" onclick="setMobilePane('map')"
+        class="flex-1 py-1.5 text-xs font-bold rounded-lg text-slate-600">
+        🗺️ Mappa Interattiva
+      </button>
+    </div>
+
+    <!-- VISTA 1: SPLIT VIEW (MAPPA + SCHEDE) -->
+    <div id="viewSplitContainer" class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      
+      <!-- Colonna Lista Schede -->
+      <div id="paneList" class="lg:col-span-6 xl:col-span-5 space-y-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1 no-scrollbar">
+        <div id="cardsContainer" class="space-y-2.5">
+          <!-- Schede luoghi generate via JS -->
+        </div>
+      </div>
+
+      <!-- Colonna Mappa Interattiva -->
+      <div id="paneMap" class="hidden lg:block lg:col-span-6 xl:col-span-7 sticky top-60">
+        <div class="bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
+          <div id="map" class="w-full h-[68vh] min-h-[420px] rounded-xl z-10"></div>
+          <div class="mt-2 px-2 py-1 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+            <div class="flex items-center gap-2">
+              <span id="mapPinStats" class="font-medium text-slate-700"> Pin caricati</span>
+              <span id="geocodingStatus" class="hidden text-amber-600 animate-pulse">• Ricerca coordinate nuovi posti...</span>
+            </div>
+            <button onclick="fitMapToVisibleMarkers()" class="text-rose-600 hover:underline font-semibold">
+              🎯 Centra tutti i pin visibili
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- VISTA 2: LISTA SCRITTA SUDDIVISA PER TAG (CATEGORIE) -->
+    <div id="viewCategoriesContainer" class="hidden space-y-8 pb-12">
+      <!-- Popolato dinamicamente con una sezione per ogni Tag -->
+    </div>
+
+    <!-- VISTA 3: ITINERARIO (drag & drop + rotte Google Maps) -->
+    <div id="viewRouteContainer" class="hidden max-w-2xl mx-auto space-y-3 pb-12"></div>
+
+  </main>
+
+  <!-- Notifica Toast in basso -->
+  <div id="toastMessage" class="fixed bottom-4 right-4 z-50 hidden px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-medium shadow-lg">
+    Aggiornato!
+  </div>
+
+  <script>
+    // ============================================================================
+    // 1. CONFIGURAZIONE E LINK GOOGLE SHEETS DELL'UTENTE
+    // ============================================================================
+    const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT8GE_TZMs-gP5OPMHlq4bkic2vkBSPr_gH57VeQ5KVZKZ4VJomIJsjMJyFl8FS8qNPWUREqPZESBW1/pub?output=csv';
+    const UNTAGGED_LABEL = '📌 Senza tag';
+
+    // Coordinate pre-mappate per i luoghi del foglio (per caricamento istantaneo su mappa)
+    const KNOWN_COORDS = {
+      "mama's | cafe & canteen no1.": [47.4891, 19.0706],
+      "Moon Budapest": [47.4988, 19.0532],
+      "Pesti Kornél - Art Corner Gift Shop": [47.4965, 19.0558],
+      "Corvin Plaza Shopping Mall": [47.4859, 19.0744],
+      "ZARA": [47.4958, 19.0522],
+      "Gifts of Budapest Souvenirs & more": [47.4994, 19.0543],
+      "Café Gerbeaud": [47.4967, 19.0504],
+      "PALACSINTÁS ROBY": [47.5015, 19.0550],
+      "Strudel Shop Anno 1926": [47.4882, 19.0601],
+      "Strudel Garden Café & Bakery": [47.5008, 19.0645],
+      "Strudel House Budapest, Első Pesti Rétesház": [47.5018, 19.0505],
+      "Perity Cukrászda": [47.5092, 19.0561],
+      "Párisi Udvar Hotel Budapest - The Unbound Collection by Hyatt": [47.4932, 19.0553],
+      "Carl Lutz rkp.": [47.5145, 19.0478],
+      "panorama view": [47.5019, 19.0348],
+      "Bem rkp.": [47.5065, 19.0394],
+      "St. Gerard Sagredo Statue": [47.4893, 19.0442],
+      "Chimney Cake Shop": [47.4981, 19.0535],
+      "Széchenyi István tér 8": [47.4997, 19.0468],
+      "Retek Bisztro": [47.5002, 19.0485],
+      "Buja Disznó(k) Gozsdu - A RÁNTOTTHÚS és egyéb finomságok!": [47.4987, 19.0592],
+      "Buja Disznó(k) Liget - A RÁNTOTTHÚS és egyéb disznóságok!": [47.5138, 19.0815],
+      "Buja Disznó(k) Buda - A RÁNTOTTHÚS és egyéb disznóságok!": [47.5097, 19.0270],
+      "1# BIRRIA Taco Bar": [47.4975, 19.0621],
+      "Vörösmarty tér": [47.4962, 19.0508],
+      "Szent István tér": [47.5008, 19.0528],
+      "Auguszt Cukrászda Belváros": [47.4926, 19.0573],
+      "Déryné Bakery": [47.4969, 19.0357],
+      "Molnár's kürtőskalács": [47.4918, 19.0545],
+      "Galerias Paris": [47.4932, 19.0553],
+      "Twentysix Budapest Restaurant": [47.4996, 19.0593],
+      "Freyja - the croissant story": [47.4984, 19.0706],
+      "Freyja - the bakery": [47.5029, 19.0253],
+      "arán bakery budapest": [47.4973, 19.0637],
+      "Flatty Coffee Shop - Basilica": [47.5015, 19.0532],
+      "Flatty Coffee Shop - Fövám": [47.4872, 19.0579],
+      "Bageri": [47.5011, 19.0583],
+      "Artizán Bakery": [47.5052, 19.0518],
+      "Lui": [47.4979, 19.0605],
+      "Crunchy Astoria": [47.4945, 19.0603],
+      "Langos Bros": [47.4998, 19.0682],
+      "PESTI LÁNGOS": [47.4968, 19.0642],
+      "Langos Papi": [47.4991, 19.0575],
+      "Retro Lángos Budapest": [47.5026, 19.0552],
+      "New York Café": [47.4987, 19.0704],
+      "Szimpla Kert": [47.4969, 19.0633],
+      "Parlamento di Budapest": [47.5071, 19.0457],
+      "Bastione dei Pescatori": [47.5022, 19.0348],
+      "Mercato Centrale": [47.4871, 19.0584],
+      "Terme Széchenyi": [47.5186, 19.0824],
+      "Terme Gellért": [47.4839, 19.0521]
+    };
+
+    // Dati di fallback nel caso in cui si apra il sito in aereo senza internet
+    const FALLBACK_PLACES = [
+      { id: 1, citta: "Budapest, Ungheria", titolo: "Café Gerbeaud", nota: "", url: "https://www.google.com/maps/place/Caf%C3%A9+Gerbeaud/data=!4m2!3m1!1s0x4741dc41d2b5e269:0xef6639923d137fad", tags: ["🧁 Dolcini"] },
+      { id: 2, citta: "Budapest, Ungheria", titolo: "Párisi Udvar Hotel Budapest - The Unbound Collection by Hyatt", nota: "", url: "https://www.google.com/maps/place/P%C3%A1risi+Udvar+Hotel+Budapest+-+The+Unbound+Collection+by+Hyatt/data=!4m2!3m1!1s0x4741dc45d7b64a63:0x660b8cc6aa95fd92", tags: ["📸 Spot", "👀 Da vedere"] },
+      { id: 3, citta: "Budapest, Ungheria", titolo: "Vörösmarty tér", nota: "Mercatini di Natale \ngiovedì 11–21\nvenerdì 11–22\nsabato 11–22\ndomenica 11–21\nlunedì 11–21", url: "https://www.google.com/maps/place/Budapest,+V%C3%B6r%C3%B6smarty+t%C3%A9r,+1051+Ungheria/data=!4m2!3m1!1s0x4741dc41cf276971:0xf50e2b9921c7f197", tags: ["👀 Da vedere"] },
+      { id: 4, citta: "Budapest, Ungheria", titolo: "Freyja - the croissant story", nota: "", url: "https://www.google.com/maps/place/Freyja+-+the+croissant+story/data=!4m2!3m1!1s0x4741dc658958f1a3:0xd4f17226d1c60c20", tags: ["🥐 Bakery"] },
+      { id: 5, citta: "Budapest, Ungheria", titolo: "Retro Lángos Budapest", nota: "", url: "https://www.google.com/maps/place/Retro+L%C3%A1ngos+Budapest/data=!4m2!3m1!1s0x4741dc6af9355c35:0x2b1ef2cbbe721094", tags: ["🍕 Langos"] }
+    ];
+
+    // ============================================================================
+    // 2. STATO DELL'APPLICAZIONE
+    // ============================================================================
+    let allPlaces = [];
+    let allTagsOrdered = [];
+    let selectedTags = new Set(); // Vuoto = mostra "Tutti"
+    let tagMatchMode = 'OR';      // 'OR' = almeno un tag, 'AND' = tutti i tag selezionati
+    let searchQuery = '';
+    let statusFilter = 'all';     // 'all' | 'todo' | 'done'
+    let currentViewMode = 'split'; // 'split' | 'categories'
+
+    // Memoria locale per spunte "Visitato" e cache coordinate GPS
+    let visitedSet = new Set(JSON.parse(localStorage.getItem('bp_visited_v1') || '[]'));
+    let geoCache = JSON.parse(localStorage.getItem('bp_geocache_v1') || '{}');
+
+    // Variabili Mappa Leaflet
+    let map = null;
+    let markersLayer = null;
+    let markerById = {};
+    let geocodeQueue = [];
+    let isGeocoding = false;
+
+    // ============================================================================
+    // 3. INIZIALIZZAZIONE MAPPA E DATI
+    // ============================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      initMap();
+      fetchPlacesFromSheet(false);
+      loadRate();
+      loadWeather();
+      renderRouteView();
+    });
+
+    function initMap() {
+      // Se Leaflet non si carica, il resto dell'app (schede, meteo, cambio, itinerario) funziona comunque
+      if (typeof L === 'undefined') {
+        document.getElementById('mapPinStats').textContent = 'Mappa non disponibile (libreria Leaflet non caricata)';
+        return;
+      }
+      map = L.map('map', {
+        center: [47.4985, 19.0545],
+        zoom: 13,
+        zoomControl: true
+      });
+
+      // Stile mappa elegante e super leggibile (CartoDB Voyager)
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 19
+      }).addTo(map);
+
+      markersLayer = L.layerGroup().addTo(map);
+    }
+
+    // ============================================================================
+    // 4. SCARICAMENTO E PARSING DEL FOGLIO GOOGLE SHEETS
+    // ============================================================================
+    function fetchPlacesFromSheet(showNotification = false) {
+      const badge = document.getElementById('syncBadge');
+      badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span> Sincronizzazione...`;
+
+      // Aggiunge un parametro anti-cache per leggere subito eventuali modifiche fatte su Sheets
+      const urlWithCacheBuster = `${SHEET_CSV_URL}&_t=${Date.now()}`;
+
+      Papa.parse(urlWithCacheBuster, {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          if (results && results.data && results.data.length > 0) {
+            processRawRows(results.data);
+            badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Live da Sheets`;
+            if (showNotification) showToast(`Sincronizzato! ${allPlaces.length} luoghi caricati da Google Sheets.`);
+          } else {
+            useFallbackData();
+          }
+        },
+        error: function(err) {
+          console.warn('Errore caricamento CSV live, uso copia di backup:', err);
+          useFallbackData();
+        }
+      });
+    }
+
+    function useFallbackData() {
+      allPlaces = FALLBACK_PLACES;
+      extractAllTags([]);
+      renderAll();
+      const badge = document.getElementById('syncBadge');
+      badge.className = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200';
+      badge.innerHTML = `Modalità Offline`;
+    }
+
+    function processRawRows(rows) {
+      const parsedPlaces = [];
+      let seededTagsFromFirstRow = [];
+
+      rows.forEach((row, index) => {
+        const titolo = (row['Titolo'] || '').trim();
+        const rawTagStr = (row['Tag'] || '').trim();
+
+        // La prima riga del tuo foglio non ha Titolo ma contiene l'elenco di tutti i tuoi Tag
+        if (!titolo) {
+          if (rawTagStr) {
+            seededTagsFromFirstRow = rawTagStr
+              .split(';')
+              .map(t => t.trim())
+              .filter(Boolean);
+          }
+          return;
+        }
+
+        // Separa i tag multipli tramite punto e virgola (;)
+        let tags = rawTagStr
+          .split(';')
+          .map(t => t.trim())
+          .filter(Boolean);
+
+        if (tags.length === 0) {
+          tags = [UNTAGGED_LABEL];
+        }
+
+        const nota = (row['Nota'] || '').trim();
+        const commento = (row['Commento'] || '').trim();
+        const url = (row['URL'] || '').trim();
+        const citta = (row['Città'] || 'Budapest, Ungheria').trim();
+
+        // Verifica se il foglio ha già colonne Lat/Lng opzionali o se conosciamo le coordinate
+        let lat = parseFloat(row['Lat'] || row['Latitudine'] || '');
+        let lng = parseFloat(row['Lng'] || row['Longitudine'] || '');
+
+        let coords = null;
+        if (!isNaN(lat) && !isNaN(lng)) {
+          coords = [lat, lng];
+        } else if (KNOWN_COORDS[titolo]) {
+          coords = KNOWN_COORDS[titolo];
+        } else if (geoCache[titolo]) {
+          coords = geoCache[titolo];
+        }
+
+        parsedPlaces.push({
+          id: `place_${index}`,
+          titolo,
+          citta,
+          nota,
+          commento,
+          url,
+          tags,
+          coords
+        });
+      });
+
+      allPlaces = parsedPlaces;
+      extractAllTags(seededTagsFromFirstRow);
+      renderAll();
+      queueMissingCoordinates();
+    }
+
+    function extractAllTags(seededTags) {
+      const tagSet = new Set(seededTags);
+      let hasUntagged = false;
+
+      allPlaces.forEach(p => {
+        p.tags.forEach(t => {
+          if (t === UNTAGGED_LABEL) {
+            hasUntagged = true;
+          } else {
+            tagSet.add(t);
+          }
+        });
+      });
+
+      allTagsOrdered = Array.from(tagSet);
+      if (hasUntagged) {
+        allTagsOrdered.push(UNTAGGED_LABEL);
+      }
+    }
+
+    // ============================================================================
+    // 5. GEOCODING AUTOMATICO PER NUOVI LUOGHI AGGIUNTI AL FOGLIO
+    // ============================================================================
+    function queueMissingCoordinates() {
+      geocodeQueue = allPlaces.filter(p => !p.coords);
+      if (geocodeQueue.length > 0 && !isGeocoding) {
+        processNextGeocode();
+      }
+    }
+
+    async function processNextGeocode() {
+      if (geocodeQueue.length === 0) {
+        isGeocoding = false;
+        document.getElementById('geocodingStatus').classList.add('hidden');
+        return;
+      }
+
+      isGeocoding = true;
+      const statusEl = document.getElementById('geocodingStatus');
+      statusEl.classList.remove('hidden');
+      statusEl.textContent = `• Posizionamento automatico pin (${geocodeQueue.length} rimanenti)...`;
+
+      const place = geocodeQueue.shift();
+
+      try {
+        const query = `${place.titolo}, Budapest, Hungary`;
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+
+        if (data && data.length > 0) {
+          const coords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+          place.coords = coords;
+          geoCache[place.titolo] = coords;
+          localStorage.setItem('bp_geocache_v1', JSON.stringify(geoCache));
+          renderMapMarkers(getFilteredPlaces());
+        }
+      } catch (e) {
+        // Ignora errori di rete singoli
+      }
+
+      // Rispetta il limite di 1 richiesta al secondo di OpenStreetMap
+      setTimeout(processNextGeocode, 1100);
+    }
+
+    // ============================================================================
+    // 6. FILTRI E RICERCA
+    // ============================================================================
+    function getFilteredPlaces() {
+      const base = allPlaces.filter(place => {
+        const isVisited = visitedSet.has(place.titolo);
+
+        // 1. Filtro stato (Tutti / Da visitare / Visitati)
+        if (statusFilter === 'todo' && isVisited) return false;
+        if (statusFilter === 'done' && !isVisited) return false;
+
+        // 2. Filtro Tag (supporta selezione singola o multipla in modalità OR / AND)
+        if (selectedTags.size > 0) {
+          const selectedArr = Array.from(selectedTags);
+          if (tagMatchMode === 'OR') {
+            const hasAny = selectedArr.some(t => place.tags.includes(t));
+            if (!hasAny) return false;
+          } else {
+            const hasAll = selectedArr.every(t => place.tags.includes(t));
+            if (!hasAll) return false;
+          }
+        }
+
+        // 3. Filtro testo barra di ricerca
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          const matchTitle = place.titolo.toLowerCase().includes(q);
+          const matchNote = place.nota.toLowerCase().includes(q);
+          const matchComment = place.commento.toLowerCase().includes(q);
+          const matchTag = place.tags.some(t => t.toLowerCase().includes(q));
+          if (!matchTitle && !matchNote && !matchComment && !matchTag) return false;
+        }
+
+        return true;
+      });
+      return applyRadar(base);
+    }
+
+    function toggleTag(tag) {
+      if (tag === '__ALL__') {
+        selectedTags.clear();
+      } else {
+        if (selectedTags.has(tag)) {
+          selectedTags.delete(tag);
+        } else {
+          selectedTags.add(tag);
+        }
+      }
+      renderAll();
+    }
+
+    function toggleTagMatchMode() {
+      tagMatchMode = tagMatchMode === 'OR' ? 'AND' : 'OR';
+      const label = document.getElementById('tagModeLabel');
+      label.textContent = tagMatchMode === 'OR' ? 'ALMENO UNO (OR)' : 'TUTTI INSIEME (AND)';
+      renderAll();
+    }
+
+    function handleSearch(val) {
+      searchQuery = val.trim();
+      document.getElementById('clearSearchBtn').classList.toggle('hidden', !searchQuery);
+      renderAll();
+    }
+
+    function clearSearch() {
+      const input = document.getElementById('searchInput');
+      input.value = '';
+      handleSearch('');
+    }
+
+    function handleStatusFilter(val) {
+      statusFilter = val;
+      renderAll();
+    }
+
+    function toggleVisited(titolo) {
+      if (visitedSet.has(titolo)) {
+        visitedSet.delete(titolo);
+      } else {
+        visitedSet.add(titolo);
+      }
+      localStorage.setItem('bp_visited_v1', JSON.stringify(Array.from(visitedSet)));
+      renderAll();
+    }
+
+    // ============================================================================
+    // 7. RENDERING INTERFACCIA (BARRA TAG, SCHEDE, MAPPA, VISTA CATEGORIE)
+    // ============================================================================
+    function renderAll() {
+      const filtered = getFilteredPlaces();
+      renderHeaderStats(filtered);
+      renderTagBar();
+      renderCardsList(filtered);
+      renderMapMarkers(filtered);
+      renderCategoriesView(filtered);
+      renderRouteView();
+      renderUserMarker();
+    }
+
+    function renderHeaderStats(filtered) {
+      const visitedCount = allPlaces.filter(p => visitedSet.has(p.titolo)).length;
+      document.getElementById('statsSubheader').textContent =
+        `${allPlaces.length} luoghi salvati • ${visitedCount} visitati • ${filtered.length} visibili con i filtri attuali`;
+      document.getElementById('mobCountBadge').textContent = filtered.length;
+    }
+
+    function renderTagBar() {
+      const container = document.getElementById('tagBarContainer');
+      const isAllSelected = selectedTags.size === 0;
+
+      let html = `
+        <button onclick="toggleTag('__ALL__')"
+          class="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 border ${
+            isAllSelected
+              ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+          }">
+          <span>✨ Tutti</span>
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] ${isAllSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'}">
+            ${allPlaces.length}
+          </span>
+        </button>
+      `;
+
+      allTagsOrdered.forEach(tag => {
+        const count = allPlaces.filter(p => p.tags.includes(tag)).length;
+        const active = selectedTags.has(tag);
+        const safeTag = tag.replace(/'/g, "\\'");
+
+        html += `
+          <button onclick="toggleTag('${safeTag}')"
+            class="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 border ${
+              active
+                ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                : 'bg-white text-slate-700 border-slate-200 hover:border-rose-300 hover:bg-rose-50/40'
+            }">
+            <span>${escapeHtml(tag)}</span>
+            <span class="px-1.5 py-0.2 rounded-full text-[10px] ${active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}">
+              ${count}
+            </span>
+          </button>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    // Estrae l'emoji dal primo tag per usarla come icona del pin sulla mappa
+    function getPlaceEmoji(place) {
+      const firstTag = place.tags[0] || '📍';
+      const match = firstTag.match(/(\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
+      return match ? match[0] : '📍';
+    }
+
+    function renderCardsList(filtered) {
+      const container = document.getElementById('cardsContainer');
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="bg-white rounded-2xl p-8 text-center border border-slate-200">
+            <div class="text-3xl mb-2">🔍</div>
+            <p class="font-bold text-slate-800">Nessun luogo trovato con questi filtri</p>
+            <p class="text-xs text-slate-500 mt-1">Prova a selezionare "Tutti" nella barra dei tag o a cancellare la ricerca.</p>
+            <button onclick="toggleTag('__ALL__'); clearSearch();"
+              class="mt-4 px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 transition">
+              Ripristina filtri
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(place => buildPlaceCardHTML(place)).join('');
+    }
+
+    function buildPlaceCardHTML(place) {
+      const isVisited = visitedSet.has(place.titolo);
+      const safeTitle = place.titolo.replace(/'/g, "\\'");
+
+      const tagsHtml = place.tags.map(t => {
+        const isTagActive = selectedTags.has(t);
+        const safeT = t.replace(/'/g, "\\'");
+        return `
+          <button onclick="toggleTag('${safeT}')"
+            class="px-2.5 py-0.5 rounded-full text-[11px] font-medium border transition ${
+              isTagActive
+                ? 'bg-rose-100 text-rose-800 border-rose-300'
+                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+            }">
+            ${escapeHtml(t)}
+          </button>
+        `;
+      }).join('');
+
+      const noteHtml = (place.nota || place.commento) ? `
+        <div class="mt-2.5 p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/80 text-xs text-slate-700 whitespace-pre-line leading-relaxed">
+          <span class="font-semibold text-amber-900">📝 Nota:</span> ${escapeHtml(place.nota)}${place.commento ? `\n${escapeHtml(place.commento)}` : ''}
+        </div>
+      ` : '';
+
+      return `
+        <article id="card_${place.id}" class="bg-white rounded-2xl p-4 border transition shadow-sm hover:shadow-md ${
+          isVisited ? 'border-emerald-300 bg-emerald-50/20' : 'border-slate-200'
+        }">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <h3 class="font-bold text-slate-900 text-sm sm:text-base leading-snug ${isVisited ? 'line-through text-slate-500' : ''}">
+                  ${escapeHtml(place.titolo)}${walkBadge(place)}
+                </h3>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                ${tagsHtml}
+              </div>
+            </div>
+
+            <!-- Spunta Visitato -->
+            <button onclick="toggleVisited('${safeTitle}')"
+              title="${isVisited ? 'Segna come da visitare' : 'Segna come già visitato'}"
+              class="shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition flex items-center gap-1 ${
+                isVisited
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+              }">
+              <span>${isVisited ? '✅' : '⬜'}</span>
+              <span class="hidden sm:inline">${isVisited ? 'Visitato' : 'Da vedere'}</span>
+            </button>
+          </div>
+
+          ${noteHtml}
+
+          <!-- Azioni Mappa -->
+          <div class="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 no-print">
+            ${routeBtn(place)}
+            ${
+              place.coords
+                ? `<button onclick="focusPlaceOnMap('${place.id}')"
+                    class="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 px-2.5 py-1.5 rounded-lg hover:bg-rose-50 transition">
+                    <span>📍</span> Mostra sulla mappa
+                  </button>`
+                : `<span class="text-[11px] text-slate-400 italic">📍 Ricerca coordinate...</span>`
+            }
+
+            ${
+              place.url
+                ? `<a href="${place.url}" target="_blank" rel="noopener noreferrer"
+                    class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition">
+                    <span>🗺️</span> Apri in Google Maps ↗
+                  </a>`
+                : ''
+            }
+          </div>
+        </article>
+      `;
+    }
+
+    // ============================================================================
+    // 8. VISTA 2: LISTA SCRITTA DIVISA PER CATEGORIE (TAG)
+    // ============================================================================
+    function renderCategoriesView(filtered) {
+      const container = document.getElementById('viewCategoriesContainer');
+
+      // Determina quali sezioni di tag mostrare
+      const tagsToDisplay = selectedTags.size > 0
+        ? allTagsOrdered.filter(t => selectedTags.has(t))
+        : allTagsOrdered;
+
+      let sectionsHtml = '';
+
+      tagsToDisplay.forEach(tag => {
+        const placesInTag = filtered.filter(p => p.tags.includes(tag));
+        if (placesInTag.length === 0) return;
+
+        const itemsHtml = placesInTag.map(place => {
+          const isVisited = visitedSet.has(place.titolo);
+          const safeTitle = place.titolo.replace(/'/g, "\\'");
+          const otherTags = place.tags.filter(t => t !== tag);
+
+          return `
+            <div class="p-3.5 sm:p-4 bg-white rounded-xl border ${isVisited ? 'border-emerald-200 bg-emerald-50/20' : 'border-slate-200'} flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-300 transition">
+              <div class="space-y-1 flex-1">
+                <div class="flex items-center gap-2.5">
+                  <button onclick="toggleVisited('${safeTitle}')" class="text-base no-print" title="Spunta visitato">
+                    ${isVisited ? '✅' : '⬜'}
+                  </button>
+                  <span class="font-bold text-slate-900 text-sm sm:text-base ${isVisited ? 'line-through text-slate-400' : ''}">
+                    ${escapeHtml(place.titolo)}${walkBadge(place)}
+                  </span>
+                </div>
+
+                ${
+                  otherTags.length > 0
+                    ? `<div class="flex flex-wrap gap-1 pl-6">
+                        <span class="text-[11px] text-slate-400 mr-1">Altri tag:</span>
+                        ${otherTags.map(ot => `<span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-medium">${escapeHtml(ot)}</span>`).join('')}
+                      </div>`
+                    : ''
+                }
+
+                ${
+                  (place.nota || place.commento)
+                    ? `<div class="pl-6 pt-1 text-xs text-amber-900 bg-amber-50/70 rounded-lg p-2 mt-1 whitespace-pre-line border border-amber-200/60">
+                        <strong>📝 Nota:</strong> ${escapeHtml(place.nota)} ${escapeHtml(place.commento)}
+                      </div>`
+                    : ''
+                }
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 pl-6 sm:pl-0 shrink-0 no-print">
+                ${routeBtn(place)}
+                ${
+                  place.coords
+                    ? `<button onclick="setViewMode('split'); setTimeout(() => focusPlaceOnMap('${place.id}'), 150);"
+                        class="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 transition">
+                        📍 Mappa
+                      </button>`
+                    : ''
+                }
+                ${
+                  place.url
+                    ? `<a href="${place.url}" target="_blank" rel="noopener noreferrer"
+                        class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
+                        Maps ↗
+                      </a>`
+                    : ''
+                }
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        sectionsHtml += `
+          <section class="space-y-3">
+            <div class="flex items-center justify-between border-b-2 border-slate-200 pb-2">
+              <h2 class="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <span>${escapeHtml(tag)}</span>
+              </h2>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800">
+                ${placesInTag.length} ${placesInTag.length === 1 ? 'luogo' : 'luoghi'}
+              </span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              ${itemsHtml}
+            </div>
+          </section>
+        `;
+      });
+
+      container.innerHTML = sectionsHtml || `
+        <div class="bg-white rounded-2xl p-8 text-center border border-slate-200">
+          <p class="font-bold text-slate-700">Nessun luogo da mostrare.</p>
+        </div>
+      `;
+    }
+
+    // ============================================================================
+    // 9. MARKER SULLA MAPPA LEAFLET
+    // ============================================================================
+    function renderMapMarkers(filtered) {
+      if (!map || !markersLayer) return;
+
+      markersLayer.clearLayers();
+      markerById = {};
+      let pinCount = 0;
+
+      filtered.forEach(place => {
+        if (!place.coords) return;
+        pinCount++;
+
+        const emoji = getPlaceEmoji(place);
+        const isVisited = visitedSet.has(place.titolo);
+
+        const icon = L.divIcon({
+          className: '',
+          html: `<div class="custom-emoji-pin ${isVisited ? 'visited-pin' : ''}">${emoji}</div>`,
+          iconSize: [36, 36],
+          iconAnchor: [18, 18],
+          popupAnchor: [0, -18]
+        });
+
+        const popupHtml = `
+          <div class="p-1 min-w-[200px] max-w-[260px]">
+            <div class="font-bold text-slate-900 text-sm mb-1">${escapeHtml(place.titolo)}</div>
+            <div class="flex flex-wrap gap-1 mb-2">
+              ${place.tags.map(t => `<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold">${escapeHtml(t)}</span>`).join('')}
+            </div>
+            ${place.nota ? `<div class="text-xs text-slate-600 bg-amber-50 p-2 rounded-lg mb-2 whitespace-pre-line border border-amber-200">${escapeHtml(place.nota)}</div>` : ''}
+            ${place.url ? `<a href="${place.url}" target="_blank" rel="noopener noreferrer" class="block text-center w-full py-1.5 px-3 rounded-lg bg-rose-600 text-white font-semibold text-xs hover:bg-rose-700 transition">🗺️ Apri in Google Maps</a>` : ''}
+          </div>
+        `;
+
+        const marker = L.marker(place.coords, { icon }).bindPopup(popupHtml);
+        markersLayer.addLayer(marker);
+        markerById[place.id] = marker;
+      });
+
+      document.getElementById('mapPinStats').textContent = `${pinCount} di ${filtered.length} luoghi posizionati sulla mappa`;
+    }
+
+    function focusPlaceOnMap(placeId) {
+      // Se siamo su smartphone, passa automaticamente al pannello mappa
+      if (window.innerWidth < 1024) {
+        setMobilePane('map');
+      }
+
+      const marker = markerById[placeId];
+      if (marker && map) {
+        setTimeout(() => {
+          map.invalidateSize();
+          map.setView(marker.getLatLng(), 16, { animate: true });
+          marker.openPopup();
+        }, 100);
+      }
+    }
+
+    function fitMapToVisibleMarkers() {
+      const markers = Object.values(markerById);
+      if (markers.length === 0 || !map) return;
+      const group = L.featureGroup(markers);
+      map.fitBounds(group.getBounds().pad(0.12));
+    }
+
+    // ============================================================================
+    // 10. CAMBIO MODALITÀ DI VISUALIZZAZIONE E LAYOUT MOBILE
+    // ============================================================================
+    function setViewMode(mode) {
+      currentViewMode = mode;
+      const ids = { split: 'viewSplitContainer', categories: 'viewCategoriesContainer', route: 'viewRouteContainer' };
+      const btns = { split: 'btnViewSplit', categories: 'btnViewCategories', route: 'btnViewRoute' };
+      const base = 'flex-1 sm:flex-initial px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition flex items-center justify-center gap-1.5 ';
+      for (const m in ids) {
+        document.getElementById(ids[m]).classList.toggle('hidden', m !== mode);
+        document.getElementById(btns[m]).className = base + (m === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900');
+      }
+      document.getElementById('mobileSplitToggle').classList.toggle('hidden', mode !== 'split');
+      if (mode === 'split') setTimeout(() => map && map.invalidateSize(), 150);
+    }
+
+    function setMobilePane(pane) {
+      const paneList = document.getElementById('paneList');
+      const paneMap = document.getElementById('paneMap');
+      const tabList = document.getElementById('mobTabList');
+      const tabMap = document.getElementById('mobTabMap');
+
+      if (pane === 'list') {
+        paneList.classList.remove('hidden');
+        paneMap.classList.add('hidden');
+        tabList.className = 'flex-1 py-1.5 text-xs font-bold rounded-lg bg-white text-slate-900 shadow-sm';
+        tabMap.className = 'flex-1 py-1.5 text-xs font-bold rounded-lg text-slate-600';
+      } else {
+        paneList.classList.add('hidden');
+        paneMap.classList.remove('hidden');
+        tabMap.className = 'flex-1 py-1.5 text-xs font-bold rounded-lg bg-white text-slate-900 shadow-sm';
+        tabList.className = 'flex-1 py-1.5 text-xs font-bold rounded-lg text-slate-600';
+        setTimeout(() => map && map.invalidateSize(), 150);
+      }
+    }
+
+    // ============================================================================
+    // 11. METEO (Open-Meteo, nessuna chiave API)
+    // ============================================================================
+    const WMO = (c) => c === 0 ? ['☀️','Sereno'] : c <= 3 ? ['⛅','Nuvoloso'] : c <= 48 ? ['🌫️','Nebbia']
+      : c <= 57 ? ['🌦️','Pioviggine'] : c <= 67 ? ['🌧️','Pioggia'] : c <= 77 ? ['❄️','Neve']
+      : c <= 82 ? ['🌧️','Rovesci'] : c <= 86 ? ['❄️','Neve'] : ['⛈️','Temporale'];
+
+    async function loadWeather() {
+      const box = document.getElementById('weatherBox');
+      try {
+        const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=47.4979&longitude=19.0402&current=temperature_2m,weather_code,precipitation&timezone=Europe%2FBudapest');
+        const c = (await r.json()).current;
+        const [icon, label] = WMO(c.weather_code);
+        const ok = c.weather_code <= 3 && c.temperature_2m >= 8;
+        box.textContent = `${icon} ${Math.round(c.temperature_2m)}°C ${label} • ${ok ? 'ideale per mercatini all\u2019aperto' : 'meglio un caffè storico ☕'}`;
+      } catch (e) {
+        box.textContent = '🌡️ Meteo non disponibile';
+      }
+    }
+
+    // ============================================================================
+    // 12. CONVERTITORE EUR <-> HUF (Frankfurter, gratuito; fallback indicativo)
+    // ============================================================================
+    let rate = parseFloat(localStorage.getItem('bp_rate_v1')) || 390;
+    let rateLive = false;
+
+    function updateRateLabel() {
+      document.getElementById('rateLabel').textContent = `1€ = ${rate.toFixed(1)} Ft${rateLive ? '' : ' (indicativo)'}`;
+    }
+    async function loadRate() {
+      updateRateLabel();
+      try {
+        const r = await fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=HUF');
+        const d = await r.json();
+        if (d && d.rates && d.rates.HUF) {
+          rate = d.rates.HUF; rateLive = true;
+          localStorage.setItem('bp_rate_v1', String(rate));
+        }
+      } catch (e) { /* resta il tasso in cache o di riferimento */ }
+      updateRateLabel();
+    }
+    function convertCurrency(from) {
+      const e = document.getElementById('eurIn'), h = document.getElementById('hufIn');
+      if (from === 'eur') {
+        const v = parseFloat(e.value); h.value = isNaN(v) ? '' : Math.round(v * rate);
+      } else {
+        const v = parseFloat(h.value); e.value = isNaN(v) ? '' : (v / rate).toFixed(2);
+      }
+    }
+
+    // ============================================================================
+    // 13. RADAR A PIEDI (geolocalizzazione + Haversine)
+    // ============================================================================
+    let radarOn = false, userPos = null, radarMin = 15, radarLayer = null;
+    const WALK_M_PER_MIN = 80, DETOUR = 1.25; // 80 m/min, +25% rispetto alla linea d'aria
+
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371000, t = x => x * Math.PI / 180;
+      const dLat = t(lat2 - lat1), dLon = t(lon2 - lon1);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(t(lat1)) * Math.cos(t(lat2)) * Math.sin(dLon / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+
+    function applyRadar(list) {
+      if (!radarOn || !userPos) return list;
+      list.forEach(p => {
+        p.walkMin = p.coords ? haversine(userPos[0], userPos[1], p.coords[0], p.coords[1]) * DETOUR / WALK_M_PER_MIN : null;
+      });
+      return list.filter(p => p.walkMin !== null && p.walkMin <= radarMin).sort((a, b) => a.walkMin - b.walkMin);
+    }
+
+    function toggleRadar() {
+      const btn = document.getElementById('radarBtn');
+      if (radarOn) {
+        radarOn = false;
+        btn.className = btn.className.replace('bg-sky-600 text-white', 'bg-white text-sky-700');
+        btn.textContent = '📡 Radar';
+        renderAll();
+        return;
+      }
+      if (!navigator.geolocation) { showToast('Geolocalizzazione non supportata da questo browser.'); return; }
+      btn.textContent = '📡 Cerco il GPS...';
+      navigator.geolocation.getCurrentPosition(pos => {
+        userPos = [pos.coords.latitude, pos.coords.longitude];
+        radarOn = true;
+        btn.className = btn.className.replace('bg-white text-sky-700', 'bg-sky-600 text-white');
+        btn.textContent = '📡 Radar attivo';
+        renderAll();
+        if (map) map.setView(userPos, 15);
+        showToast(`Radar: luoghi entro ${radarMin} min a piedi, dal più vicino.`);
+      }, err => {
+        btn.textContent = '📡 Radar';
+        showToast('Posizione non disponibile: serve il permesso GPS e una pagina in HTTPS.');
+      }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
+    }
+
+    function setRadarMin(v) { radarMin = parseInt(v, 10); renderAll(); }
+
+    function renderUserMarker() {
+      if (!map) return;
+      if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null; }
+      if (!radarOn || !userPos) return;
+      radarLayer = L.layerGroup([
+        L.circle(userPos, { radius: radarMin * WALK_M_PER_MIN / DETOUR, color: '#0284c7', weight: 1.5, dashArray: '6 6', fillOpacity: 0.05 }),
+        L.circleMarker(userPos, { radius: 7, color: '#fff', weight: 2, fillColor: '#0284c7', fillOpacity: 1 })
+      ]).addTo(map);
+    }
+
+    function walkBadge(p) {
+      return radarOn && p.walkMin != null
+        ? `<span class="ml-2 px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold whitespace-nowrap">🚶 ~${Math.round(p.walkMin)} min</span>` : '';
+    }
+
+    // ============================================================================
+    // 14. ITINERARIO: DRAG & DROP (SortableJS) + ROTTE GOOGLE MAPS
+    // ============================================================================
+    let route = JSON.parse(localStorage.getItem('bp_route_v1') || '[]'); // titoli, nell'ordine scelto
+
+    function saveRoute() { localStorage.setItem('bp_route_v1', JSON.stringify(route)); }
+
+    function routeBtn(p) {
+      const on = route.includes(p.titolo);
+      return `<button onclick="toggleRoute('${p.id}')" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition ${
+        on ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-sky-700 border-sky-200 hover:bg-sky-50'}">${on ? '🧭 In itinerario' : '➕ Itinerario'}</button>`;
+    }
+
+    function toggleRoute(id) {
+      const p = allPlaces.find(x => x.id === id);
+      if (!p) return;
+      const i = route.indexOf(p.titolo);
+      if (i >= 0) route.splice(i, 1); else route.push(p.titolo);
+      saveRoute();
+      renderAll();
+      showToast(i >= 0 ? 'Tolto dall\u2019itinerario' : `Aggiunto all\u2019itinerario (${route.length})`);
+    }
+
+    function removeStop(title) { route = route.filter(t => t !== title); saveRoute(); renderAll(); }
+    function clearRoute() { if (confirm('Svuotare l\u2019itinerario?')) { route = []; saveRoute(); renderAll(); } }
+
+    function stopQ(p) { return p.coords ? `${p.coords[0]},${p.coords[1]}` : encodeURIComponent(p.titolo + ', Budapest'); }
+
+    function dirUrl(list) {
+      if (list.length === 1) return 'https://www.google.com/maps/search/?api=1&query=' + stopQ(list[0]);
+      const w = list.slice(1, -1).map(stopQ).join('%7C');
+      return `https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=${stopQ(list[0])}&destination=${stopQ(list[list.length - 1])}${w ? '&waypoints=' + w : ''}`;
+    }
+
+    // Google Maps accetta ~10 punti per link: oltre, spezza in tratti che si agganciano
+    function chunkStops(list, n = 10) {
+      const out = [];
+      for (let i = 0; ; i += n - 1) {
+        out.push(list.slice(i, i + n));
+        if (i + n >= list.length) break;
+      }
+      return out;
+    }
+
+    function renderRouteView() {
+      document.getElementById('routeCount').textContent = route.length;
+      const c = document.getElementById('viewRouteContainer');
+      const stops = route.map(t => allPlaces.find(p => p.titolo === t)).filter(Boolean);
+
+      if (stops.length === 0) {
+        c.innerHTML = `<div class="bg-white rounded-2xl p-8 text-center border border-slate-200">
+          <div class="text-3xl mb-2">🧭</div>
+          <p class="font-bold text-slate-800">Nessuna tappa nell\u2019itinerario</p>
+          <p class="text-xs text-slate-500 mt-1">Premi "➕ Itinerario" su un luogo, poi trascina le tappe qui per ordinarle.</p></div>`;
+        return;
+      }
+
+      const chunks = chunkStops(stops);
+      const links = chunks.map((ch, i) => `<a href="${dirUrl(ch)}" target="_blank" rel="noopener noreferrer"
+          class="px-3 py-2 rounded-xl bg-sky-600 text-white text-xs font-semibold hover:bg-sky-700 transition">🗺️ ${chunks.length > 1 ? `Tratto ${i + 1} (${ch.length} tappe)` : 'Apri percorso in Google Maps'} ↗</a>`).join('');
+
+      const items = stops.map((p, i) => {
+        const next = stops[i + 1];
+        return `<li data-title="${escapeHtml(p.titolo)}" class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+          <span class="drag-handle cursor-grab select-none px-1 text-slate-400 text-xl" style="touch-action:none" title="Trascina per riordinare">☰</span>
+          <span class="w-6 h-6 shrink-0 rounded-full bg-sky-600 text-white text-xs font-bold flex items-center justify-center">${i + 1}</span>
+          <div class="flex-1 min-w-0">
+            <div class="font-bold text-sm text-slate-900 truncate">${escapeHtml(p.titolo)}</div>
+            ${next ? `<a href="${dirUrl([p, next])}" target="_blank" rel="noopener noreferrer" class="text-[11px] font-semibold text-sky-700 hover:underline">🚶 tratta verso la prossima tappa ↗</a>` : ''}
+          </div>
+          <button onclick="removeStop(this.closest('li').dataset.title)" class="shrink-0 px-2 py-1 text-slate-400 hover:text-rose-600 text-sm" title="Rimuovi">✕</button>
+        </li>`;
+      }).join('');
+
+      c.innerHTML = `<div class="bg-white rounded-2xl p-4 border border-slate-200">
+          <h2 class="font-extrabold text-slate-900">🧭 Il tuo itinerario</h2>
+          <p class="text-xs text-slate-500 mt-0.5">Trascina ☰ per riordinare: l\u2019ordine resta salvato su questo dispositivo.</p>
+          <div class="mt-3 flex flex-wrap gap-2">${links}
+            <button onclick="clearRoute()" class="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 transition">🗑️ Svuota</button></div>
+        </div>
+        <ul id="routeList" class="space-y-2">${items}</ul>`;
+
+      new Sortable(document.getElementById('routeList'), {
+        handle: '.drag-handle', animation: 150, ghostClass: 'opacity-40',
+        onEnd: () => {
+          route = [...document.querySelectorAll('#routeList [data-title]')].map(el => el.dataset.title);
+          saveRoute();
+          renderRouteView();
+        }
+      });
+    }
+
+    // Utility
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toastMessage');
+      toast.textContent = msg;
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), 3000);
+    }
+  </script>
+</body>
+</html>
